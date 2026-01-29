@@ -1,0 +1,6 @@
+# Build outputs
+/dist/
+*.nvda-addon
+
+# Local notes
+/githubinfos.txt
