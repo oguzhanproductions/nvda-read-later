@@ -23,6 +23,7 @@ import scriptHandler
 import ui
 import globalVars
 import textInfos
+import tones
 from logHandler import log
 
 addonHandler.initTranslation()
@@ -35,7 +36,6 @@ ARTICLES_DIR = "articles"
 
 DEFAULT_SETTINGS = {
     "preserveFormatting": True,
-    "plainTextOnRead": False,
 }
 
 ALLOWED_TAGS = {
@@ -114,6 +114,36 @@ def _save_settings(settings):
     data_dir, _articles_dir = _ensure_dirs()
     _save_json(os.path.join(data_dir, SETTINGS_FILE), settings)
 
+
+def _play_save_tone():
+    try:
+        tones.beep(880, 80)
+    except Exception:
+        try:
+            wx.Bell()
+        except Exception:
+            pass
+
+def _play_error_tone():
+    try:
+        tones.beep(220, 200)
+    except Exception:
+        try:
+            wx.Bell()
+        except Exception:
+            pass
+
+
+def _maximize_message_window(title):
+    try:
+        for win in wx.GetTopLevelWindows():
+            if win.GetTitle() == title:
+                win.Maximize()
+                win.Raise()
+                win.SetFocus()
+                break
+    except Exception:
+        pass
 def _bind_escape_close(dlg):
     def on_char(event):
         if event.GetKeyCode() == wx.WXK_ESCAPE:
@@ -402,67 +432,6 @@ class SaveArticleDialog(wx.Dialog):
         return self.title_ctrl.GetValue().strip(), self.url_ctrl.GetValue().strip(), self.preserve_check.GetValue()
 
 
-class SettingsDialog(wx.Dialog):
-    def __init__(self, parent):
-        super().__init__(parent, title=_("Read Later Settings"))
-        self.settings = _load_settings()
-        _bind_escape_close(self)
-
-        sizer = wx.BoxSizer(wx.VERTICAL)
-
-        self.plain_text_check = wx.CheckBox(self, label=_("Open articles in plain text view by default"))
-        self.plain_text_check.SetValue(self.settings.get("plainTextOnRead", False))
-        sizer.Add(self.plain_text_check, 0, wx.ALL, 10)
-
-        btn_sizer = self.CreateButtonSizer(wx.OK | wx.CANCEL)
-        sizer.Add(btn_sizer, 0, wx.EXPAND | wx.ALL, 10)
-        self.SetSizerAndFit(sizer)
-
-    def apply(self):
-        self.settings["plainTextOnRead"] = self.plain_text_check.GetValue()
-        _save_settings(self.settings)
-
-
-class ReadDialog(wx.Dialog):
-    def __init__(self, parent, title, html_content, text_content, open_plain=False):
-        super().__init__(parent, title=title, size=(700, 600))
-        _bind_escape_close(self)
-
-        sizer = wx.BoxSizer(wx.VERTICAL)
-
-        self.notebook = wx.Notebook(self)
-        self.html_panel = wx.Panel(self.notebook)
-        self.text_panel = wx.Panel(self.notebook)
-
-        html_sizer = wx.BoxSizer(wx.VERTICAL)
-        self.html_window = wx.html.HtmlWindow(self.html_panel, style=wx.BORDER_SIMPLE)
-        self.html_window.SetPage(html_content)
-        self.html_window.Bind(wx.html.EVT_HTML_LINK_CLICKED, self.on_link_clicked)
-        html_sizer.Add(self.html_window, 1, wx.EXPAND | wx.ALL, 5)
-        self.html_panel.SetSizer(html_sizer)
-
-        text_sizer = wx.BoxSizer(wx.VERTICAL)
-        self.text_ctrl = wx.TextCtrl(self.text_panel, value=text_content, style=wx.TE_MULTILINE | wx.TE_READONLY)
-        text_sizer.Add(self.text_ctrl, 1, wx.EXPAND | wx.ALL, 5)
-        self.text_panel.SetSizer(text_sizer)
-
-        self.notebook.AddPage(self.html_panel, _("Formatted"))
-        self.notebook.AddPage(self.text_panel, _("Plain text"))
-
-        sizer.Add(self.notebook, 1, wx.EXPAND | wx.ALL, 5)
-
-        close_btn = wx.Button(self, id=wx.ID_CLOSE, label=_("Close"))
-        close_btn.Bind(wx.EVT_BUTTON, lambda evt: self.Close())
-        sizer.Add(close_btn, 0, wx.ALIGN_RIGHT | wx.ALL, 5)
-
-        self.SetSizer(sizer)
-        if open_plain:
-            self.notebook.SetSelection(1)
-
-    def on_link_clicked(self, event):
-        ui.message(_("Links are disabled in reading view."))
-
-
 class LibraryDialog(wx.Dialog):
     def __init__(self, parent):
         super().__init__(parent, title=_("Read Later Library"), size=(750, 500))
@@ -493,23 +462,28 @@ class LibraryDialog(wx.Dialog):
         self.export_btn = wx.Button(self, label=_("Export"))
         self.export_all_btn = wx.Button(self, label=_("Export All"))
         self.delete_btn = wx.Button(self, label=_("Delete"))
-        self.settings_btn = wx.Button(self, label=_("Settings"))
         self.close_btn = wx.Button(self, label=_("Close"))
 
         self.open_btn.Bind(wx.EVT_BUTTON, self.on_open)
         self.export_btn.Bind(wx.EVT_BUTTON, self.on_export)
         self.export_all_btn.Bind(wx.EVT_BUTTON, self.on_export_all)
         self.delete_btn.Bind(wx.EVT_BUTTON, self.on_delete)
-        self.settings_btn.Bind(wx.EVT_BUTTON, self.on_settings)
         self.close_btn.Bind(wx.EVT_BUTTON, lambda evt: self.Close())
 
-        for btn in (self.open_btn, self.export_btn, self.export_all_btn, self.delete_btn, self.settings_btn, self.close_btn):
+        for btn in (self.open_btn, self.export_btn, self.export_all_btn, self.delete_btn, self.close_btn):
             button_sizer.Add(btn, 0, wx.ALL, 5)
 
         main_sizer.Add(button_sizer, 0, wx.ALIGN_CENTER)
 
         self.SetSizer(main_sizer)
         self._refresh_list()
+        wx.CallAfter(self._focus_list)
+
+    def _focus_list(self):
+        if self.list_ctrl.GetItemCount() > 0:
+            self.list_ctrl.Select(0)
+            self.list_ctrl.EnsureVisible(0)
+        self.list_ctrl.SetFocus()
 
     def _refresh_list(self):
         self.list_ctrl.DeleteAllItems()
@@ -550,7 +524,9 @@ class LibraryDialog(wx.Dialog):
             ui.message(_("Unable to open the article file."))
             return
         try:
-            ui.browseableMessage(html_content, record.get("title", "Article"), True)
+            title = record.get("title", "Article")
+            ui.browseableMessage(html_content, title, True)
+            wx.CallAfter(_maximize_message_window, title)
         except Exception:
             ui.message(_("Unable to open the reader view."))
 
@@ -653,20 +629,6 @@ class LibraryDialog(wx.Dialog):
         self._refresh_list()
         ui.message(_("Deleted."))
 
-    def on_settings(self, event):
-        try:
-            if gui.mainFrame:
-                gui.mainFrame.prePopup()
-            dlg = SettingsDialog(self)
-            if dlg.ShowModal() == wx.ID_OK:
-                dlg.apply()
-                ui.message(_("Settings saved."))
-            dlg.Destroy()
-        finally:
-            if gui.mainFrame:
-                gui.mainFrame.postPopup()
-
-
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     scriptCategory = _("Read Later")
 
@@ -713,6 +675,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             dlg.Destroy()
         finally:
             self._post_popup()
+
+    @scriptHandler.script(
+        description=_("Open the article library"),
+        gesture="kb:NVDA+j",
+    )
+    def script_openLibrary(self, gesture):
+        wx.CallAfter(self._on_open_library, None)
 
     def _get_current_url(self):
         try:
@@ -827,6 +796,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             _save_index(records)
 
             wx.CallAfter(ui.message, _("Article saved."))
+            wx.CallAfter(_play_save_tone)
         except urllib.error.URLError:
             if focus_text:
                 try:
@@ -852,12 +822,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                     records.insert(0, record)
                     _save_index(records)
                     wx.CallAfter(ui.message, _("Article saved using on-screen text."))
+                    wx.CallAfter(_play_save_tone)
                     return
                 except Exception:
                     pass
             wx.CallAfter(ui.message, _("Failed to download the page."))
+            wx.CallAfter(_play_error_tone)
         except Exception:
             wx.CallAfter(ui.message, _("Saving failed."))
+            wx.CallAfter(_play_error_tone)
 
 
 def _infer_title_from_html(html):
