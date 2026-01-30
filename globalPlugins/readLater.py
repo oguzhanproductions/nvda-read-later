@@ -879,8 +879,9 @@ def _make_plain_html(title, url, html):
 
 
 def _strip_tags(html):
-    text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.IGNORECASE | re.DOTALL)
-    text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.IGNORECASE | re.DOTALL)
+    # Tolerate malformed closing tags like </script\t\n foo> by allowing extra text.
+    text = re.sub(r"<script\b[^>]*>.*?</script\b[^>]*>", "", html, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<style\b[^>]*>.*?</style\b[^>]*>", "", text, flags=re.IGNORECASE | re.DOTALL)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
